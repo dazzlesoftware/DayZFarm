@@ -392,44 +392,73 @@ again. If the BattlEye kick still happens even with the junction genuinely in pl
 is likely wrong and the real cause lies elsewhere (see the idle/inactivity section below, or a
 possible genuine BattlEye service issue).
 
-## "BattlEye: Game restart required" kicks a consistent, short time (e.g. ~5 minutes) into every agent-launched session, but never when launched and played manually
+## "BattlEye: Game restart required" kicks partway into every agent-launched session
 
-This is a different cause from the one above, and is much more likely if the kick happens at a
-consistent, fairly short time regardless of what's happening in-game. Nobody is physically
-touching the VM's mouse/keyboard once the dashboard starts a session — unlike a real player, who
-constantly resets Windows' own idle timers just by playing. If the VM's screensaver, display/
-sleep timeout, or a "Machine inactivity limit" Group Policy fires mid-session, the interactive
-desktop the game is running on effectively goes away out from under it, and BattlEye's periodic
-in-session integrity check does not tolerate that.
+**Confirmed root cause**: `BEService` (BattlEye's persistent Windows service — distinct from its
+per-session game client) is installed by DayZ set to **Manual** start (`DEMAND_START`) and not
+actually running, and stays that way on a freshly installed or cloned VM until something starts
+it at least once. Confirmed via:
+```powershell
+Get-Service BEService     # Status: Stopped
+sc.exe qc BEService        # START_TYPE: 3  DEMAND_START
+```
+and by the complete absence of any `BEClient_x64_<date>.log` under
+`<DayZ install>\battleye\` (only the `BEClient_x64.dll` itself is present) — that log is written
+fresh every session BattlEye's client actually initializes, so a total absence of it across every
+session means the client never properly attaches. Without a running `BEService`, DayZ can still
+connect to a server normally, but BattlEye is never actually protecting the session — the server
+eventually notices and kicks with "kicked off by BattlEye: Game restart required" (server-side
+log shows this as kick code `240`). This reproduced identically regardless of mod load order or
+launch method once actually tested carefully — it is not related to the mod-path/order
+investigations above, and not related to idle timers; both were reasonable hypotheses at the
+time but were superseded by this more direct evidence.
 
-Two layers of fix:
+**Fix** (inside the VM, elevated PowerShell):
+```powershell
+Set-Service BEService -StartupType Automatic
+Start-Service BEService
+Get-Service BEService     # should now show Running
+```
+Since every client differences off the master image, this should be fixed **once, in the master
+image itself** (see docs/MASTER-IMAGE.md's "Manual steps" — a step for this was added there) so
+every new client inherits `BEService` already set to auto-start, rather than needing this
+per-client. For clients already created before this fix existed, run the two commands above on
+each one (or accept the current session's disk and re-run `Create-Client.ps1` after fixing the
+master, for a future client).
 
-1. **Agent-side (partial, automatic once you re-publish)**: `ReconnectWatchdogService` now calls
-   `IdleActivitySuppressor.KeepSystemAndDisplayAwake()` every watchdog tick (`SetThreadExecutionState`)
-   while DayZ is running, which prevents Windows' own display/sleep power timers from firing.
-   This works regardless of which session the agent itself runs in (it's a system-wide power
-   hint), so no interactive-session trick is needed here, unlike the Steam/DayZ launch fixes
-   above. It does **not**, however, cover a screensaver or a "Machine inactivity limit" policy —
-   those key off actual input activity (`GetLastInputInfo`), not power state.
-   ```powershell
-   dotnet publish H:\DayZProject\src\DayZFarm.Agent -c Release -o C:\DayZFarmAgent
-   Restart-Service "DayZ Farm Agent"
-   ```
-2. **One-time VM configuration (do this too — it's the more likely actual cause)**: inside the
-   client VM (and ideally in the master image, so every client inherits it — see
-   docs/MASTER-IMAGE.md), disable the screensaver, display/sleep timeouts, and any inactivity-
-   limit lock policy entirely:
-   ```powershell
-   powercfg /change monitor-timeout-ac 0
-   powercfg /change standby-timeout-ac 0
-   powercfg /change hibernate-timeout-ac 0
-   Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name ScreenSaveActive -Value 0
-   ```
-   Also check, if the VM is domain-joined or was provisioned from a template with Group Policy
-   applied, whether "Interactive logon: Machine inactivity limit" (Local Security Policy /
-   `secpol.msc` → Local Policies → Security Options) is set to anything other than 0/disabled,
-   and disable it if so — that policy locks the workstation independently of the screensaver and
-   power settings above.
+If BattlEye still kicks after confirming `BEService` is genuinely `Running`, check for a fresh
+`BEClient_x64_<date>.log` under `<DayZ install>\battleye\` as direct confirmation the client
+component is actually attaching, and if it now exists, look inside it for a specific rejection
+reason rather than assuming the same root cause is still at play.
+
+### Ruled out / superseded investigations (kept for context)
+
+Two other theories were pursued before the `BEService` finding above, in case they resurface as
+contributing factors once BattlEye is actually running correctly:
+
+- **Idle timers / screensaver**: nobody is physically touching the VM's mouse/keyboard once the
+  dashboard starts a session, unlike a real player. `ReconnectWatchdogService` now calls
+  `IdleActivitySuppressor.KeepSystemAndDisplayAwake()` every tick while DayZ is running
+  (`SetThreadExecutionState`, prevents Windows' display/sleep power timers specifically — not a
+  screensaver or a "Machine inactivity limit" policy, which key off actual input activity
+  instead). Also worth doing at the OS level, ideally once in the master image:
+  ```powershell
+  powercfg /change monitor-timeout-ac 0
+  powercfg /change standby-timeout-ac 0
+  powercfg /change hibernate-timeout-ac 0
+  Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name ScreenSaveActive -Value 0
+  ```
+  and check `secpol.msc` → Local Policies → Security Options → "Interactive logon: Machine
+  inactivity limit" if the VM was provisioned from a template with Group Policy applied.
+- **Mod load order**: `RequiredMods` was entered as Workshop IDs sorted in ascending numeric
+  order (from a directory listing), not the server's actual required order — Workshop IDs have
+  no relationship to dependency order. The RPT log showed a repeated `NULL pointer to instance`
+  script exception (`DayZGame.GetBBPBuildTools`, called every frame from `AirborneAI`) right
+  before a "Game restart required" fault, consistent with `BaseBuildingPlus` not being
+  initialized before `AirborneAI` starts calling into it — a real mod-load-order sensitivity,
+  independent of BattlEye. If kicks persist after fixing `BEService`, get the server's actual
+  required mod order (its Discord/website, or a published Workshop Collection) and match
+  `RequiredMods`'s order to it exactly.
 
 ## A client shows "Agent: Offline"
 

@@ -37,7 +37,21 @@ master a pure OS image and populating the library via some other temporary VM �
    not log in yet.** If using the Steam Library disk, in Steam go to Settings → Storage, add a
    Library Folder on the second disk's drive letter, and set it as the default — then install
    DayZ (App ID 221100) so it lands there instead of the OS disk.
-4. **Install DayZ Farm Agent.**
+4. **Set BattlEye's service to auto-start.** DayZ installs `BEService` (BattlEye's persistent
+   Windows service, distinct from its per-session game client) set to **Manual** start and
+   **not started** by default — it stays that way on a freshly installed/cloned VM until
+   something starts it at least once. Every client differencing off this master inherits
+   whatever state `BEService` is in here, so fix it once, in the master:
+   ```powershell
+   Set-Service BEService -StartupType Automatic
+   Start-Service BEService
+   ```
+   If this is skipped, DayZ can still connect to a server, but BattlEye's client component
+   never properly attaches (no `BEClient_x64_<date>.log` gets written under
+   `<DayZ install>\battleye\` — check for that file as confirmation it's working), and the
+   server eventually kicks with "BattlEye: Game restart required" partway into every session.
+   See docs/TROUBLESHOOTING.md.
+5. **Install DayZ Farm Agent.**
    - `dotnet publish src/DayZFarm.Agent -c Release -o C:\DayZFarmAgent` (run on the host, then
      copy the output into the VM, e.g. via a shared folder or a temporary network share).
    - Inside the VM: `C:\DayZFarmAgent\DayZFarm.Agent.exe` once to generate its token file
@@ -46,14 +60,14 @@ master a pure OS image and populating the library via some other temporary VM �
      sc.exe create "DayZ Farm Agent" binPath= "C:\DayZFarmAgent\DayZFarm.Agent.exe" start= auto
      sc.exe start "DayZ Farm Agent"
      ```
-5. **Configure low graphics settings** (see "Graphics" below) so the master's default DayZ
+6. **Configure low graphics settings** (see "Graphics" below) so the master's default DayZ
    config file is already reasonable for every client.
-6. **Shut down the master VM.**
-7. **Protect the master disks.** Mark both `DayZ-Master.vhdx` and (if used) `SteamLibrary-
+7. **Shut down the master VM.**
+8. **Protect the master disks.** Mark both `DayZ-Master.vhdx` and (if used) `SteamLibrary-
    Master.vhdx` read-only at the filesystem level (`attrib +r`) as a safety net, and never boot
    `DayZ-Master` again except for a deliberate rebuild (see below). Differencing children break
    if either parent's on-disk bytes change.
-8. **Create differencing clients** — see the root README / docs/INSTALL.md.
+9. **Create differencing clients** — see the root README / docs/INSTALL.md.
    `Create-Client.ps1`/`Create-Clients.ps1` auto-detect `SteamLibrary-Master.vhdx` at its
    conventional path and give each client its own differencing disk against it with no further
    setup; pass `-SkipSteamLibraryDisk` to opt a given client out.
