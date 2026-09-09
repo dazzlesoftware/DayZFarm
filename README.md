@@ -4,6 +4,8 @@ Runs multiple legitimate DayZ game clients simultaneously on Windows 11 + Hyper-
 own VM, with its own Steam account and its own Steam session — for private server QA, load
 testing, and controlled client/server automation.
 
+![DayZ Client Farm Management System](screenshot.png)
+
 **This project does not, and will never, bypass Steam, bypass BattlEye, bypass licensing, or
 emulate a Steam client.** Every client VM runs a real Steam client logged into a real,
 legitimate Steam account that owns DayZ.
