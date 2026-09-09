@@ -1,0 +1,7 @@
+H:\DayZProject\src\DayZFarm.Agent\obj\Debug\net10.0\DayZFarm.Agent.csproj.AssemblyReference.cache
+H:\DayZProject\src\DayZFarm.Agent\obj\Debug\net10.0\rpswa.dswa.cache.json
+H:\DayZProject\src\DayZFarm.Agent\obj\Debug\net10.0\DayZFarm.Agent.GeneratedMSBuildEditorConfig.editorconfig
+H:\DayZProject\src\DayZFarm.Agent\obj\Debug\net10.0\DayZFarm.Agent.AssemblyInfoInputs.cache
+H:\DayZProject\src\DayZFarm.Agent\obj\Debug\net10.0\DayZFarm.Agent.AssemblyInfo.cs
+H:\DayZProject\src\DayZFarm.Agent\obj\Debug\net10.0\DayZFarm.Agent.csproj.CoreCompileInputs.cache
+H:\DayZProject\src\DayZFarm.Agent\obj\Debug\net10.0\DayZFarm.Agent.MvcApplicationPartsAssemblyInfo.cache

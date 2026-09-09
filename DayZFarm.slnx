@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DayZFarm.Agent/DayZFarm.Agent.csproj" />
+    <Project Path="src/DayZFarm.Controller/DayZFarm.Controller.csproj" />
+    <Project Path="src/DayZFarm.Core/DayZFarm.Core.csproj" />
+    <Project Path="src/DayZFarm.HyperV/DayZFarm.HyperV.csproj" />
+    <Project Path="src/DayZFarm.Shared/DayZFarm.Shared.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DayZFarm.Tests/DayZFarm.Tests.csproj" />
+  </Folder>
+</Solution>
