@@ -17,7 +17,7 @@ src/
   DayZFarm.Core/        Domain models, config, interfaces, pure logic (naming, batching, backoff)
   DayZFarm.HyperV/      IVirtualMachineProvider implementation (Hyper-V via PowerShell)
   DayZFarm.Controller/  ASP.NET Core host: REST API, SignalR, dashboard, SQLite, secrets
-  DayZFarm.Agent/       Per-VM Windows Service: Steam/DayZ process management, watchdog
+  DayZFarm.Agent/       Per-VM Scheduled Task (interactive session): Steam/DayZ process management, watchdog
 scripts/                Install-Host, Create-Master, Create-Client(s), Create-SteamLibraryDisk, Remove-Client, Start/Stop-Client, Configure-Network
 config/                 appsettings.example.json
 docs/                   INSTALL, ARCHITECTURE, MASTER-IMAGE, STEAM-SETUP, TROUBLESHOOTING
@@ -76,12 +76,23 @@ dotnet publish src/DayZFarm.Agent -c Release -o C:\DayZFarmAgent
 ```
 
 Copy the publish output into the client VM, run `DayZFarm.Agent.exe` once (generates its token),
-then register it as a Windows Service:
+then install it with `scripts/Install-Agent.ps1`:
 
 ```powershell
-sc.exe create "DayZ Farm Agent" binPath= "C:\DayZFarmAgent\DayZFarm.Agent.exe" start= auto
-sc.exe start "DayZ Farm Agent"
+.\Install-Agent.ps1 -UserName Dayz-Master
 ```
+
+This registers the agent as a **Scheduled Task** that runs directly in that account's
+interactive logon session (and configures Windows auto-logon for it, so the VM boots straight
+into that session) — **not** a LocalSystem Windows Service. That distinction matters: BattlEye
+was found to consistently kick a session launched via a Session-0 service's
+CreateProcessAsUser-based workaround ("Bad Packet"/"Game restart required"), since its
+anti-tamper checks distrust a game process descending from a privileged service using a
+duplicated security token — the same pattern real cheat-injection tooling uses. Running the
+agent as a normal interactive process avoids that pattern entirely; see
+docs/TROUBLESHOOTING.md. `-UserName` should be the same Windows account you log Steam into for
+this VM (see docs/STEAM-SETUP.md below) — the whole point is for the agent to run in that same
+session.
 
 Do this once in the master image before creating client differencing disks, so every client
 inherits the agent already installed.

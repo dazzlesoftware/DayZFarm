@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Text.RegularExpressions;
-using DayZFarm.Agent.Interop;
 using DayZFarm.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -28,56 +26,22 @@ public sealed class WindowsWorkshopManager : IWorkshopManager
     }
 
     /// <summary>
-    /// Every registered Steam Library Folder (the folder alongside steam.exe itself, plus every
-    /// one listed in steamapps/libraryfolders.vdf — see docs/TROUBLESHOOTING.md for why this
-    /// project can't assume DayZ/its Workshop content is co-located with steam.exe).
-    /// </summary>
-    private IReadOnlyList<string> LibraryRoots()
-    {
-        var steamExe = _steam.DiscoverSteamExePath();
-        if (steamExe is null) return Array.Empty<string>();
-        var steamRoot = Path.GetDirectoryName(steamExe);
-        if (steamRoot is null) return Array.Empty<string>();
-
-        var roots = new List<string> { steamRoot };
-        roots.AddRange(ParseLibraryFolderRoots(steamRoot));
-        return roots;
-    }
-
-    /// <summary>
     /// Every directory that could hold DayZ's Workshop content across every registered Steam
-    /// Library Folder. Workshop content for an app lives under whichever library folder *that
-    /// app itself* is installed to -- not necessarily alongside steam.exe. This project's own
-    /// design routinely puts DayZ on a separate library folder entirely (the
-    /// SteamLibrary-Master.vhdx disk, often a different drive letter — see docs/MASTER-IMAGE.md),
-    /// so assuming co-location with steam.exe silently scanned an empty/wrong folder and
-    /// reported every mod as "Missing" even when genuinely installed. See docs/TROUBLESHOOTING.md.
+    /// Library Folder (via <see cref="SteamManager.LibraryRoots"/> -- shared there since
+    /// discovering install/library locations isn't workshop-specific). Workshop content for an
+    /// app lives under whichever library folder *that app itself* is installed to -- not
+    /// necessarily alongside steam.exe. This project's own design routinely puts DayZ on a
+    /// separate library folder entirely (the SteamLibrary-Master.vhdx disk, often a different
+    /// drive letter — see docs/MASTER-IMAGE.md), so assuming co-location with steam.exe silently
+    /// scanned an empty/wrong folder and reported every mod as "Missing" even when genuinely
+    /// installed. See docs/TROUBLESHOOTING.md.
     /// </summary>
     private IReadOnlyList<string> WorkshopContentDirectories() =>
-        LibraryRoots()
+        _steam.LibraryRoots()
             .Select(root => Path.Combine(root, "steamapps", "workshop", "content", DayZAppId.ToString()))
             .Where(Directory.Exists)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-
-    /// <summary>DayZ's own install directory (whichever library folder it happens to be
-    /// installed to), or null if it can't be found.</summary>
-    private string? FindDayZInstallDirectory() =>
-        LibraryRoots()
-            .Select(root => Path.Combine(root, "steamapps", "common", "DayZ"))
-            .FirstOrDefault(Directory.Exists);
-
-    private static IEnumerable<string> ParseLibraryFolderRoots(string steamRoot)
-    {
-        var vdfPath = Path.Combine(steamRoot, "steamapps", "libraryfolders.vdf");
-        if (!File.Exists(vdfPath)) yield break;
-
-        // libraryfolders.vdf is Valve's simple key-value format; each library folder entry has
-        // a "path" line with the folder's root (backslash-escaped). A tiny regex scan is enough
-        // -- no need for a full VDF parser for this one field.
-        foreach (Match m in Regex.Matches(File.ReadAllText(vdfPath), "\"path\"\\s*\"(.*?)\""))
-            yield return m.Groups[1].Value.Replace(@"\\", @"\");
-    }
 
     /// <summary>Every installed mod's content folder, keyed by Workshop ID (the folder name).
     /// Shared by <see cref="GetInstalledModsAsync"/> and <see cref="ResolveModPathsAsync"/> so
@@ -105,7 +69,7 @@ public sealed class WindowsWorkshopManager : IWorkshopManager
     public Task<IReadOnlyList<string>> ResolveModPathsAsync(IReadOnlyList<string> workshopIds, CancellationToken ct = default)
     {
         var installed = FindInstalledModFolders();
-        var dayzInstallDir = FindDayZInstallDirectory();
+        var dayzInstallDir = _steam.FindDayZInstallDirectory();
         var tokens = new List<string>();
 
         foreach (var id in workshopIds)
@@ -200,9 +164,7 @@ public sealed class WindowsWorkshopManager : IWorkshopManager
             _logger.LogWarning(
                 "Workshop mod {Id} is not installed and cannot be subscribed automatically. " +
                 "Opening its Workshop page — an administrator must click Subscribe once for this VM.", id);
-            // Must run in the interactive session, not Session 0 -- see InteractiveProcessLauncher's
-            // remarks (same class of bug as the Steam/DayZ launch fix).
-            InteractiveProcessLauncher.StartInInteractiveSession(steamExe, $"steam://url/CommunityFilePage/{id}");
+            Process.Start(new ProcessStartInfo(steamExe, $"steam://url/CommunityFilePage/{id}") { UseShellExecute = true });
             // Steam visibly struggles/misbehaves (dropped or stuck overlay windows) if these
             // steam:// URLs are fired back-to-back for a large mod list -- observed directly
             // when the directory-detection bug above falsely flagged an entire ~24-mod list as

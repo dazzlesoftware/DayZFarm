@@ -1,0 +1,11 @@
+H:\DayZProject\src\DayZFarm.Shared\bin\Release\net10.0\DayZFarm.Shared.deps.json
+H:\DayZProject\src\DayZFarm.Shared\bin\Release\net10.0\DayZFarm.Shared.dll
+H:\DayZProject\src\DayZFarm.Shared\bin\Release\net10.0\DayZFarm.Shared.pdb
+H:\DayZProject\src\DayZFarm.Shared\obj\Release\net10.0\DayZFarm.Shared.GeneratedMSBuildEditorConfig.editorconfig
+H:\DayZProject\src\DayZFarm.Shared\obj\Release\net10.0\DayZFarm.Shared.AssemblyInfoInputs.cache
+H:\DayZProject\src\DayZFarm.Shared\obj\Release\net10.0\DayZFarm.Shared.AssemblyInfo.cs
+H:\DayZProject\src\DayZFarm.Shared\obj\Release\net10.0\DayZFarm.Shared.csproj.CoreCompileInputs.cache
+H:\DayZProject\src\DayZFarm.Shared\obj\Release\net10.0\DayZFarm.Shared.dll
+H:\DayZProject\src\DayZFarm.Shared\obj\Release\net10.0\refint\DayZFarm.Shared.dll
+H:\DayZProject\src\DayZFarm.Shared\obj\Release\net10.0\DayZFarm.Shared.pdb
+H:\DayZProject\src\DayZFarm.Shared\obj\Release\net10.0\ref\DayZFarm.Shared.dll

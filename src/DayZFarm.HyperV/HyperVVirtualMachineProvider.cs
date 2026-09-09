@@ -148,16 +148,37 @@ public sealed class HyperVVirtualMachineProvider : IVirtualMachineProvider
                 """
             : "";
 
+        // The whole creation sequence is wrapped in try/catch: without this, any step failing
+        // partway (e.g. a bad Set-VMMemory call, or any other mid-script error) left a
+        // half-configured VM/disk behind -- New-VM had already succeeded -- which then blocked
+        // every subsequent retry with "VM already exists" until someone noticed and manually
+        // ran Remove-VM/deleted the leftover disk(s). Any failure now best-effort tears down
+        // whatever this same attempt already created (never anything pre-existing) before
+        // re-throwing the original error, so a failed creation is safe to simply retry. See
+        // docs/TROUBLESHOOTING.md.
         var script = $$"""
             $ErrorActionPreference = 'Stop'
-            New-VHD -Path '{{Escape(diskPath)}}' -ParentPath '{{Escape(request.ParentVhdxPath)}}' -Differencing | Out-Null
-            $vm = New-VM -Name '{{Escape(request.Name)}}' -Generation {{request.Generation}} -MemoryStartupBytes {{memoryBytes}} -VHDPath '{{Escape(diskPath)}}' -SwitchName '{{Escape(request.VirtualSwitchName)}}'
-            {{steamDiskScript}}
-            Set-VMProcessor -VMName '{{Escape(request.Name)}}' -Count {{request.CpuCount}}
-            Set-VMMemory -VMName '{{Escape(request.Name)}}' -DynamicMemoryEnabled ${{(request.DynamicMemory ? "$true" : "$false")}}
-            Set-VMFirmware -VMName '{{Escape(request.Name)}}' -EnableSecureBoot On -SecureBootTemplate 'MicrosoftWindows'
-            Enable-VMIntegrationService -VMName '{{Escape(request.Name)}}' -Name 'Guest Service Interface','Heartbeat','Key-Value Pair Exchange','Shutdown','Time Synchronization','VSS'
-            Set-VM -Name '{{Escape(request.Name)}}' -AutomaticCheckpointsEnabled $false
+            try {
+                New-VHD -Path '{{Escape(diskPath)}}' -ParentPath '{{Escape(request.ParentVhdxPath)}}' -Differencing | Out-Null
+                $vm = New-VM -Name '{{Escape(request.Name)}}' -Generation {{request.Generation}} -MemoryStartupBytes {{memoryBytes}} -VHDPath '{{Escape(diskPath)}}' -SwitchName '{{Escape(request.VirtualSwitchName)}}'
+                {{steamDiskScript}}
+                Set-VMProcessor -VMName '{{Escape(request.Name)}}' -Count {{request.CpuCount}}
+                Set-VMMemory -VMName '{{Escape(request.Name)}}' -DynamicMemoryEnabled {{(request.DynamicMemory ? "$true" : "$false")}}
+                Set-VMFirmware -VMName '{{Escape(request.Name)}}' -EnableSecureBoot On -SecureBootTemplate 'MicrosoftWindows'
+                Enable-VMIntegrationService -VMName '{{Escape(request.Name)}}' -Name 'Guest Service Interface','Heartbeat','Key-Value Pair Exchange','Shutdown','Time Synchronization','VSS'
+                Set-VM -Name '{{Escape(request.Name)}}' -AutomaticCheckpointsEnabled $false
+            } catch {
+                $failure = $_
+                $existingVm = Get-VM -Name '{{Escape(request.Name)}}' -ErrorAction SilentlyContinue
+                if ($existingVm) {
+                    if ($existingVm.State -ne 'Off') { Stop-VM -Name '{{Escape(request.Name)}}' -Force -ErrorAction SilentlyContinue }
+                    Remove-VM -Name '{{Escape(request.Name)}}' -Force -ErrorAction SilentlyContinue
+                }
+                foreach ($diskToRemove in @('{{Escape(diskPath)}}', '{{Escape(steamDiskPath ?? "")}}')) {
+                    if ($diskToRemove -and (Test-Path $diskToRemove)) { Remove-Item $diskToRemove -Force -ErrorAction SilentlyContinue }
+                }
+                throw $failure
+            }
             """;
         var result = await _runner.RunAsync(script, ct);
         ThrowIfFailed(result, $"create VM '{request.Name}'");

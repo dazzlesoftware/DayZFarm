@@ -18,7 +18,9 @@ Windows 11 Host
 |
 |-- DayZ-Master (never booted with a differencing child attached; template only)
 |-- DayZ-001 .. DayZ-NNN (differencing disks against DayZ-Master)
-      |-- DayZ Farm Agent (ASP.NET Core minimal API, runs as a Windows Service)
+      |-- DayZ Farm Agent (ASP.NET Core minimal API, runs as a Scheduled Task in the
+      |     VM's own interactive logon session -- deliberately NOT a Windows Service; see
+      |     docs/TROUBLESHOOTING.md's BattlEye section for why)
             |-- SteamManager (discovers/starts/stops Steam, launches DayZ via -applaunch)
             |-- WindowsDayZLauncher (IDayZLauncher)
             |-- DayZLogStatusProvider (IDayZStatusProvider)

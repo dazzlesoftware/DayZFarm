@@ -209,14 +209,16 @@ applied explicitly — `ConfigureHttpJsonOptions` only covers minimal-API endpoi
 ## Steam shows "Login needed" even though you're logged into Steam interactively in the VM
 
 Fixed as of the current version. `SteamManager.GetLoginState()` originally read
-`Registry.CurrentUser\Software\Valve\Steam\ActiveProcess\ActiveUser`. The agent runs as a
-`LocalSystem` Windows Service (Session 0 — see `sc.exe create` in the root README's guest-agent
-install steps), while Steam runs in the VM's actual interactive desktop session (whatever
-account you log into the VM as, e.g. via Hyper-V console or RDP). `Registry.CurrentUser` from a
-Session-0 LocalSystem process resolves to LocalSystem's own hive — a completely different,
-unrelated registry tree from the interactive user's — so the `ActiveProcess` key was never
-found there, and the login check always reported "not logged in" no matter what Steam's actual
-state was.
+`Registry.CurrentUser\Software\Valve\Steam\ActiveProcess\ActiveUser`. At the time this was
+fixed, the agent ran as a `LocalSystem` Windows Service (Session 0) — see the "BattlEye" section
+below for why it no longer does — while Steam ran in the VM's actual interactive desktop session
+(whatever account you log into the VM as). `Registry.CurrentUser` from a Session-0 LocalSystem
+process resolves to LocalSystem's own hive — a completely different, unrelated registry tree
+from the interactive user's — so the `ActiveProcess` key was never found there, and the login
+check always reported "not logged in" no matter what Steam's actual state was. This fix remains
+correct and necessary even now that the agent runs interactively (as a Scheduled Task, in that
+same account's session): it makes no assumption about which session is reading the registry, so
+it works either way.
 
 The fix scans every loaded user hive under `HKEY_USERS` instead of assuming
 `Registry.CurrentUser`: any interactively logged-on user's hive is mounted under
@@ -225,7 +227,8 @@ The fix scans every loaded user hive under `HKEY_USERS` instead of assuming
 logged into the VM. Re-publish and restart the agent inside each VM to pick this up:
 ```powershell
 dotnet publish H:\DayZProject\src\DayZFarm.Agent -c Release -o C:\DayZFarmAgent
-Restart-Service "DayZ Farm Agent"
+Get-Process DayZFarm.Agent -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-ScheduledTask -TaskName "DayZ Farm Agent"
 ```
 If this still reports "not logged in" after that, check that the account you logged Steam into
 interactively is actually still logged on (not just RDP-disconnected in a way that unloads its
@@ -279,7 +282,8 @@ dashboard, rather than silently misbehaving. Re-publish and restart the agent in
 pick this up:
 ```powershell
 dotnet publish H:\DayZProject\src\DayZFarm.Agent -c Release -o C:\DayZFarmAgent
-Restart-Service "DayZ Farm Agent"
+Get-Process DayZFarm.Agent -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-ScheduledTask -TaskName "DayZ Farm Agent"
 ```
 If a VM is currently in the wedged state described above, restart the VM once to clear it, then
 apply this fix before trying Start DayZ again.
@@ -359,7 +363,8 @@ as a warning and simply omitted from the launch rather than failing the whole la
 and restart the agent inside each VM to pick this up:
 ```powershell
 dotnet publish H:\DayZProject\src\DayZFarm.Agent -c Release -o C:\DayZFarmAgent
-Restart-Service "DayZ Farm Agent"
+Get-Process DayZFarm.Agent -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-ScheduledTask -TaskName "DayZ Farm Agent"
 ```
 
 ## History: `-mod=` referencing mods via `!Workshop\<id>` instead of their absolute path
@@ -383,7 +388,8 @@ can't be found or junction creation fails for any reason. Re-publish and restart
 each VM to pick this up:
 ```powershell
 dotnet publish H:\DayZProject\src\DayZFarm.Agent -c Release -o C:\DayZFarmAgent
-Restart-Service "DayZ Farm Agent"
+Get-Process DayZFarm.Agent -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-ScheduledTask -TaskName "DayZ Farm Agent"
 ```
 If mods are still kicked as "missing" immediately after this, check the agent log for a "Failed
 to create !Workshop junction" warning — that means junction creation itself failed (e.g. DayZ's
@@ -392,46 +398,157 @@ again. If the BattlEye kick still happens even with the junction genuinely in pl
 is likely wrong and the real cause lies elsewhere (see the idle/inactivity section below, or a
 possible genuine BattlEye service issue).
 
-## "BattlEye: Game restart required" kicks partway into every agent-launched session
+## "BattlEye" kicks partway into every agent-launched session ("Game restart required", then "Bad Packet") — never when launched manually
 
-**Confirmed root cause**: `BEService` (BattlEye's persistent Windows service — distinct from its
-per-session game client) is installed by DayZ set to **Manual** start (`DEMAND_START`) and not
-actually running, and stays that way on a freshly installed or cloned VM until something starts
-it at least once. Confirmed via:
+This took three real, necessary layers to fully resolve. If you're hitting a BattlEye kick,
+work through them in order and confirm each before moving to the next.
+
+### Layer 1 (necessary but not sufficient): `BEService` never running
+
+`BEService` (BattlEye's persistent Windows service — distinct from its per-session game client)
+is installed by DayZ set to **Manual** start (`DEMAND_START`) and not actually running, and stays
+that way on a freshly installed or cloned VM until something starts it at least once. Confirmed
+via:
 ```powershell
 Get-Service BEService     # Status: Stopped
 sc.exe qc BEService        # START_TYPE: 3  DEMAND_START
 ```
-and by the complete absence of any `BEClient_x64_<date>.log` under
-`<DayZ install>\battleye\` (only the `BEClient_x64.dll` itself is present) — that log is written
-fresh every session BattlEye's client actually initializes, so a total absence of it across every
-session means the client never properly attaches. Without a running `BEService`, DayZ can still
-connect to a server normally, but BattlEye is never actually protecting the session — the server
-eventually notices and kicks with "kicked off by BattlEye: Game restart required" (server-side
-log shows this as kick code `240`). This reproduced identically regardless of mod load order or
-launch method once actually tested carefully — it is not related to the mod-path/order
-investigations above, and not related to idle timers; both were reasonable hypotheses at the
-time but were superseded by this more direct evidence.
-
-**Fix** (inside the VM, elevated PowerShell):
+and by the complete absence of any `BEClient_x64_<date>.log` under `<DayZ install>\battleye\`
+(only the `BEClient_x64.dll` itself present) — that log is written fresh every session
+BattlEye's client actually initializes. Without a running `BEService`, DayZ still connects
+normally, but BattlEye never actually protects the session, and the server eventually kicks with
+"kicked off by BattlEye: Game restart required" (server-side log: kick code `240`). Fix (inside
+the VM, elevated PowerShell):
 ```powershell
 Set-Service BEService -StartupType Automatic
 Start-Service BEService
-Get-Service BEService     # should now show Running
 ```
-Since every client differences off the master image, this should be fixed **once, in the master
-image itself** (see docs/MASTER-IMAGE.md's "Manual steps" — a step for this was added there) so
-every new client inherits `BEService` already set to auto-start, rather than needing this
-per-client. For clients already created before this fix existed, run the two commands above on
-each one (or accept the current session's disk and re-run `Create-Client.ps1` after fixing the
-master, for a future client).
+Do this once in the master image (see docs/MASTER-IMAGE.md) so every client inherits it. This
+step is real and necessary — after it, the kick message changes from "Game restart required" to
+"Bad Packet", confirming BattlEye's client is now actually attaching — but it wasn't the whole
+story; see Layer 3 below for what was still wrong.
 
-If BattlEye still kicks after confirming `BEService` is genuinely `Running`, check for a fresh
-`BEClient_x64_<date>.log` under `<DayZ install>\battleye\` as direct confirmation the client
-component is actually attaching, and if it now exists, look inside it for a specific rejection
-reason rather than assuming the same root cause is still at play.
+### Layer 2 (necessary, but must be re-applied on every boot): network checksum offload
 
-### Ruled out / superseded investigations (kept for context)
+"Bad Packet" is a real, distinct BattlEye kick reason, commonly caused by Hyper-V's virtual NIC
+corrupting UDP checksums. Disabling checksum offload/VMQ on both the host's physical adapter and
+the guest's synthetic adapter genuinely helps — but an earlier round of testing this
+concluded it made no difference, which turned out to be a false negative: **Hyper-V's synthetic
+network adapter does not persist a disabled checksum offload setting across a full VM reboot**
+the way a physical NIC's driver normally would. It silently reverts to enabled on every boot,
+confirmed directly:
+```powershell
+# Host (persists fine across reboots):
+Get-NetAdapterChecksumOffload -Name "Ethernet","vEthernet (<switch name>)"   # stayed Disabled
+# Guest (does NOT persist):
+Get-NetAdapterChecksumOffload -Name "<guest adapter, e.g. 'Ethernet 2'>"      # back to RxTxEnabled after a reboot
+```
+So a test performed any time after the guest VM had rebooted (for any reason, including the
+Layer 3 migration below) was silently running with offload re-enabled again, even though it had
+been disabled earlier in that same VM's uptime.
+
+**Fix**: `scripts/Install-Agent.ps1` now also registers a second Scheduled Task,
+"DayZ Farm - Disable NIC Offload", triggered `AtStartup` (runs as SYSTEM, before any user logon),
+which re-applies `Set-NetAdapterChecksumOffload -Disabled` on every network adapter every single
+boot. This is idempotent and self-healing — it doesn't matter how many times the VM reboots
+going forward. Also applied immediately when the script runs, so an already-running VM doesn't
+need a reboot to pick it up. Re-run `Install-Agent.ps1` on any VM that predates this fix (pass
+`-SkipAutoLogon` if that's already configured and you only need this part).
+
+### Layer 3 (real, necessary, but on its own not sufficient): the agent's Session-0 → interactive-session launch trick
+
+**Confirmed root cause**: every prior fix (Steam start/stop, DayZ launch, Workshop page opens)
+routed through a Session-0 LocalSystem service using `CreateProcessAsUser` +
+`DuplicateTokenEx` (`InteractiveProcessLauncher`) to reach the VM's interactive desktop session,
+because the agent itself ran as a LocalSystem Windows Service. This technique is a legitimate,
+standard Windows pattern, and it genuinely worked — Steam/DayZ launched and connected correctly
+either way. But BattlEye's anti-tamper checks are specifically designed to distrust a game
+process whose ancestry includes a privileged service using a manipulated/duplicated security
+token, since that's also how real cheat-injection tooling gains elevated access alongside a
+game process — and this was the one thing constant across every other failed attempt, matching
+the exact, repeated observation that a manually-launched session (a human double-clicking Steam
+themselves) never gets kicked, while every agent-launched one eventually does.
+
+**Fix**: the agent no longer runs as a Windows Service at all. `scripts/Install-Agent.ps1`
+instead registers it as a **Scheduled Task** that runs directly in the VM's own interactive
+logon session (triggered "At log on"), with Windows auto-logon configured for that account. With
+the agent's own process tree already living in that session, `SteamManager`/
+`WindowsWorkshopManager` now launch Steam/DayZ via a plain, unmodified `Process.Start` — no
+token duplication anywhere in the process tree, indistinguishable from a human launching them.
+`InteractiveProcessLauncher` is no longer called anywhere (kept in the repo, clearly marked
+unused, purely for reference/context — see its own doc comment before ever reintroducing it).
+
+Migrating an existing client VM:
+```powershell
+# Inside the VM, elevated PowerShell:
+.\Install-Agent.ps1 -UserName <the account Steam is logged into on this VM>
+```
+This removes any previous "DayZ Farm Agent" Windows Service install automatically, configures
+auto-logon, and registers the Scheduled Task. Reboot (or log off/on as that user) afterward to
+actually start the agent under the new setup. Do this once in the master image too (see
+docs/MASTER-IMAGE.md) so every future client inherits it.
+
+**This layer alone produced a large, real improvement** (survived ~9 minutes into a session,
+versus kicks within 1-5 minutes before it), confirming it's a genuine, necessary fix — but
+Layer 2's checksum-offload setting had silently reverted (due to the VM reboot this migration
+itself required) by the time that longer test ran, so it isn't yet confirmed whether Layer 3 on
+its own is fully sufficient, or whether the remaining "Bad Packet" kicks in that test were really
+Layer 2 resurfacing. Retest with **both** layers genuinely active at once (Layer 2's Scheduled
+Task now makes that durable across reboots) before concluding either one is incomplete.
+
+All three layers were confirmed genuinely, simultaneously active on a real test (`BEService`
+running, checksum offload actually `Disabled` on the guest adapter at that moment, agent running
+via the Scheduled Task) — and "Bad Packet" still happened. A direct control test then confirmed
+this is NOT a generic network-quality issue: a manually-launched (via Steam directly) session on
+the exact same VM, same server, survived 10+ minutes with no problem. So a real, fourth cause
+remained, specific to how the agent launches the game versus a human.
+
+### Layer 4 (the actual remaining root cause): launching `DayZ_x64.exe` directly instead of through `DayZ_BE.exe`
+
+**Confirmed root cause**: comparing a manual session's actual RPT-logged command line against an
+agent-launched one revealed DayZ ships a **separate BattlEye-aware host executable**,
+`DayZ_BE.exe`, alongside `DayZ_x64.exe` — confirmed directly from DayZ Launcher's own log
+(`Launcher.log`): `GameLocator: 64-bit: DayZ_x64.exe, BE: DayZ_BE.exe`, and
+`BattlEyeExecutablePath: D:\SteamLibrary\steamapps\common\DayZ\DayZ_BE.exe`. Clicking Play in the
+DayZ Launcher actually starts the game via `DayZ_BE.exe`, which properly establishes BattlEye's
+hooks before the real game process starts. The agent's launch used
+`steam.exe -applaunch 221100 ... -nolauncher` — `-nolauncher` bypasses the DayZ Launcher
+application entirely, and skipping the Launcher also means skipping its `DayZ_BE.exe` step:
+Steam falls through to starting `DayZ_x64.exe` **directly**. The game still connects and plays
+completely normally either way (BattlEye isn't required just to connect), but a directly-started
+`DayZ_x64.exe` process never gets BattlEye's hooks correctly established the way `DayZ_BE.exe`
+establishes them, and BattlEye's own periodic in-session validation eventually notices and kicks
+it as anomalous ("Bad Packet") — something that never happened for the Launcher-routed manual
+session.
+
+(A secondary difference also visible in that comparison, not yet acted on: the manual session's
+mod paths referenced each mod's real folder name inside `!Workshop\` — e.g. `!Workshop\@CF`,
+`!Workshop\@BaseBuildingPlus` — rather than the numeric Workshop ID our junctions use, and it
+included a `-password=` the agent's launch didn't. If Layer 4 alone doesn't fully resolve this,
+revisit both: reading each mod's real name, likely from its local `steamapps/workshop/content/
+221100/<id>/meta.cpp`, to name the junction after it instead of the numeric ID; and confirming
+`RequiredMods`'/the client's `ServerPassword` matches whatever this server actually expects.)
+
+**Fix**: `SteamManager.LaunchAppViaSteam` now launches `DayZ_BE.exe` directly (discovered via
+`DiscoverDayZBattlEyeExePath()`, found alongside `DayZ_x64.exe` in DayZ's own install directory)
+instead of going through `steam.exe -applaunch ... -nolauncher`, setting the
+`SteamAppId`/`SteamGameId` environment variables the same way `DayZLauncher.exe` itself does
+(from its own log) so Steamworks still initializes correctly for a process not started via
+Steam's own `-applaunch` — this only requires the Steam client to already be running. Falls back
+to the old `-applaunch` mechanism if `DayZ_BE.exe` can't be found (an unexpected install layout),
+rather than failing outright, though that reintroduces the risk described above. Re-publish and
+restart the agent inside each VM to pick this up:
+```powershell
+dotnet publish H:\DayZProject\src\DayZFarm.Agent -c Release -o C:\DayZFarmAgent
+Get-Process DayZFarm.Agent -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-ScheduledTask -TaskName "DayZ Farm Agent"
+```
+If BattlEye still kicks after this, check the agent log for a "DayZ_BE.exe not found" warning
+(meaning it fell back to the old mechanism), and check for a fresh
+`BEClient_x64_<date>.log` under `<DayZ install>\battleye\` to confirm whether BattlEye's client
+is actually attaching this time.
+
+### Other ruled out / superseded investigations (kept for context)
 
 Two other theories were pursued before the `BEService` finding above, in case they resurface as
 contributing factors once BattlEye is actually running correctly:
@@ -460,6 +577,67 @@ contributing factors once BattlEye is actually running correctly:
   required mod order (its Discord/website, or a published Workshop Collection) and match
   `RequiredMods`'s order to it exactly.
 
+## Create Client fails with "New-VHD ... The process cannot access the file because it is being used by another process"
+
+Almost always means the **master VM (`DayZ-Master`) is currently running**. `New-VHD -Differencing`
+needs to open the parent VHDX (the master's OS disk, or `SteamLibrary-Master.vhdx`) to build the
+new client's differencing disk against it, and Hyper-V holds that file locked while the master VM
+is actively running. Per docs/MASTER-IMAGE.md, the master should never be booted except for a
+deliberate rebuild — check for this first:
+```powershell
+Get-VM -Name "DayZ-Master"
+```
+If it shows `Running`, shut it down and retry:
+```powershell
+Stop-VM -Name "DayZ-Master"
+```
+(add `-Force` if it doesn't respond to a graceful shutdown). Once it's `Off`, the client creation
+should succeed. Consider marking the master's disks read-only (`attrib +r`) once it's off, as a
+safety net against this happening again by accident.
+
+If `Get-VM` itself fails with "You do not have the required permission..." rather than showing
+a VM list, that means the *checking* command wasn't run with Hyper-V administrator rights — not
+that no VM is running. Don't take an empty/failed result at face value in that case; re-run from
+an elevated PowerShell session.
+
+## Create Client fails with `Set-VMMemory : Cannot convert 'System.String' to the type 'System.Boolean'` (`$$false`/`$$true` in the error)
+
+Fixed as of the current version. `HyperVVirtualMachineProvider`'s VM-creation script had a
+duplicated `$` in its raw-string interpolation:
+`-DynamicMemoryEnabled ${{(request.DynamicMemory ? "$true" : "$false")}}` — the C# ternary
+already produces the string `"$true"`/`"$false"` (PowerShell's actual boolean literal syntax),
+but a second, literal `$` right before the interpolation braces meant the generated script
+always read `-DynamicMemoryEnabled $$false` (or `$$true`), which PowerShell parses as the
+literal string `$false`/`$true`, not a boolean — hence the type-conversion error. Fixed by
+removing the redundant leading `$`. No republish needed — this is Controller-side (HyperV
+project), not something running inside any VM; just rebuild/republish the Controller.
+
+If you hit this before the fix below existed, the `New-VM` step had already succeeded before
+`Set-VMMemory` failed, leaving a half-configured VM behind that then blocks recreation with "VM
+already exists" — see the next entry for both the manual cleanup and why it won't recur.
+
+## Create Client fails with "VM '<name>' already exists" for a client you never successfully finished creating
+
+Fixed as of the current version. `CreateAsync`'s VM-creation script had no cleanup path: if any
+step failed partway through (the `Set-VMMemory` bug above being one concrete example, but any
+future mid-script failure has the same effect), `New-VM` had typically already succeeded, so a
+half-configured VM (and possibly a disk file) was left behind — invisible to the dashboard
+(the client record was never saved, since the whole `CreateAsync` call still threw), but very
+much still real in Hyper-V, and blocking every subsequent retry of that same client name.
+
+Manual cleanup for a client already stuck this way — `scripts/Remove-Client.ps1` already handles
+exactly this (it never touches the Controller's database, only Hyper-V/disk state, so it's safe
+to run against a stuck VM that was never actually registered as a client):
+```powershell
+.\Remove-Client.ps1 -Name "<name>"
+```
+Fixed going forward by wrapping the whole creation script in `try`/`catch`: any failure now
+best-effort tears down whatever *that same attempt* already created (the VM, if it exists, and
+both possible disk files) before re-throwing the original error — never anything pre-existing,
+so a genuinely-already-existing client's own VM is never touched. A failed Create Client is now
+always safe to simply retry once the real underlying cause (whatever the error message says) is
+fixed, without any manual Hyper-V cleanup step first.
+
 ## A client shows "Agent: Offline"
 
 - Confirm the VM is actually running (`VM State` column). The agent can't respond if the VM is
@@ -467,7 +645,11 @@ contributing factors once BattlEye is actually running correctly:
 - Confirm the guest has a DHCP-assigned IP (`GuestIpAddress` in the client detail page). If
   blank, the Hyper-V integration services (`Enable-VMIntegrationService`) may not be enabled, or
   the guest hasn't finished booting yet.
-- Check the agent's Windows Service status inside the guest: `Get-Service "DayZ Farm Agent"`.
+- Check the agent's Scheduled Task status inside the guest: `Get-ScheduledTask -TaskName "DayZ Farm Agent"`
+  (`State` should be `Running`), and confirm `DayZFarm.Agent.exe` actually appears in
+  `Get-Process`. The task only starts when the account it's registered for is logged on — if
+  the VM booted but auto-logon isn't configured/working, the task never starts. See
+  docs/TROUBLESHOOTING.md's BattlEye section for how the agent is installed.
 - Check the agent is listening on the configured port (`Agent:ListenPort`, default 5099) and
   that Windows Firewall inside the guest allows inbound TCP on that port from the Hyper-V switch
   subnet (see "Firewall requirements" below).

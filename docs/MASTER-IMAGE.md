@@ -55,11 +55,18 @@ master a pure OS image and populating the library via some other temporary VM �
    - `dotnet publish src/DayZFarm.Agent -c Release -o C:\DayZFarmAgent` (run on the host, then
      copy the output into the VM, e.g. via a shared folder or a temporary network share).
    - Inside the VM: `C:\DayZFarmAgent\DayZFarm.Agent.exe` once to generate its token file
-     (`%ProgramData%\DayZFarmAgent\agent-token.secret`), then install as a service:
+     (`%ProgramData%\DayZFarmAgent\agent-token.secret`), then install with
+     `scripts\Install-Agent.ps1` (copy it into the VM too, or run it over a mapped drive):
      ```powershell
-     sc.exe create "DayZ Farm Agent" binPath= "C:\DayZFarmAgent\DayZFarm.Agent.exe" start= auto
-     sc.exe start "DayZ Farm Agent"
+     .\Install-Agent.ps1 -UserName <the account created in step 1>
      ```
+     This registers the agent as a **Scheduled Task** running directly in that account's
+     interactive logon session, and configures Windows auto-logon for it — deliberately **not**
+     a LocalSystem Windows Service; see docs/TROUBLESHOOTING.md for why (BattlEye rejects
+     sessions launched via a Session-0 service's token-duplication workaround). Since every
+     client differences off this master's OS disk, they all share this same Windows account —
+     each client then only needs its own distinct Steam account logged into it (see
+     docs/STEAM-SETUP.md), never a different Windows account.
 6. **Configure low graphics settings** (see "Graphics" below) so the master's default DayZ
    config file is already reasonable for every client.
 7. **Shut down the master VM.**

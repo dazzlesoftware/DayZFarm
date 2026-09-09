@@ -5,6 +5,22 @@ using System.Runtime.Versioning;
 namespace DayZFarm.Agent.Interop;
 
 /// <summary>
+/// NOT CURRENTLY USED. Kept for reference/context only -- do not wire this back into
+/// SteamManager/WindowsWorkshopManager without re-reading docs/TROUBLESHOOTING.md's BattlEye
+/// section first.
+///
+/// This class was the agent's original solution for launching Steam/DayZ from a LocalSystem
+/// Windows Service (Session 0) into the VM's interactive session: it worked (Steam/DayZ
+/// genuinely launched and connected), but BattlEye consistently kicked ("Bad Packet"/"Game
+/// restart required") every session launched this way, and never a manually-launched one.
+/// BattlEye's anti-tamper checks are known to distrust a game process descending from a
+/// privileged service using a duplicated security token (CreateProcessAsUser +
+/// DuplicateTokenEx, exactly what this class does) -- the same pattern real cheat-injection
+/// tooling uses. The fix was to stop needing this pattern at all: the agent now runs as a
+/// Scheduled Task directly in the interactive session (see Program.cs and
+/// scripts/Install-Agent.ps1), so Steam/DayZ launch via a plain Process.Start, with no token
+/// manipulation anywhere in the process tree -- see SteamManager and docs/TROUBLESHOOTING.md.
+///
 /// Launches a process in the currently logged-on interactive user's desktop session, instead of
 /// the caller's own session.
 ///

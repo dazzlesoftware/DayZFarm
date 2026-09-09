@@ -10,6 +10,17 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// UseWindowsService() only engages the Windows Service lifecycle when this process is actually
+// started by the Service Control Manager -- it's a safe no-op otherwise, so it's left in place
+// even though the RECOMMENDED way to run this agent is no longer as a LocalSystem Windows
+// Service. It's now installed as a Scheduled Task that runs directly in the VM's interactive
+// logon session instead (see scripts/Install-Agent.ps1): BattlEye was found to consistently
+// kick a session launched via the old (Session-0 + CreateProcessAsUser) approach, since its
+// anti-tamper checks distrust a game process descending from a privileged service using a
+// duplicated security token -- the same pattern real cheat-injection tooling uses. Running the
+// agent itself as a normal interactive process avoids that pattern entirely: Steam/DayZ launch
+// via a plain Process.Start (see SteamManager), indistinguishable from a human launching them.
+// See docs/TROUBLESHOOTING.md.
 builder.Host.UseWindowsService(options => options.ServiceName = "DayZ Farm Agent");
 
 // Local rolling log (this VM's own record of what the agent did — launches, exits, errors).
