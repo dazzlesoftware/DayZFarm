@@ -50,7 +50,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 if (configuredOptions.Hypervisor == HypervisorType.VMwareWorkstation)
 {
     builder.Services.AddSingleton<IVmrunRunner>(sp =>
-        new ProcessVmrunRunner(configuredOptions.VmrunPath, sp.GetRequiredService<ILogger<ProcessVmrunRunner>>()));
+        new ProcessVmrunRunner(configuredOptions.VmrunPath, sp.GetRequiredService<ISecretStore>(), sp.GetRequiredService<ILogger<ProcessVmrunRunner>>()));
     builder.Services.AddSingleton<IVirtualMachineProvider, VMwareVirtualMachineProvider>();
     // GPU-P (ManualGpuVirtualizationProvider) is Hyper-V-specific (Get-VMGpuPartitionAdapter) and
     // was explicitly scoped out of the VMware Workstation pass -- see docs/VMWARE-SETUP.md. This
@@ -116,6 +116,7 @@ app.UseStaticFiles();
 app.MapClientsApi();
 app.MapPluginsApi();
 app.MapAgentPackageApi();
+app.MapVmwareApi();
 app.MapHub<FarmStatusHub>("/hubs/farm-status");
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 

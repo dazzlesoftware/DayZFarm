@@ -1,5 +1,7 @@
 using GameFarm.Controller.Services;
 
+using GameFarm.Core.Interfaces;
+
 namespace GameFarm.Tests.Fakes;
 
 /// <summary>In-memory <see cref="ISecretStore"/> fake — no DPAPI/filesystem in tests.</summary>

@@ -17,7 +17,10 @@
 param(
     [Parameter(Mandatory)] [string] $Name,
     [string] $RootDirectory = "D:\GameFarm",
-    [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe"
+    [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe",
+    # Only needed if this client's VMX is encrypted -- linked clones of an encrypted master
+    # inherit its encryption. See docs/VMWARE-SETUP.md.
+    [string] $VmxPassword
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,12 +43,12 @@ if (-not $PSCmdlet.ShouldProcess($Name, "Stop and permanently remove VMware clie
 
 if (Test-VmxRunning -VmxPath $vmxPath -VmrunPath $VmrunPath) {
     Write-FarmLog "Stopping '$Name' before removal..." -LogDirectory $logDir
-    Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('stop', $vmxPath, 'hard') | Out-Null
+    Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('stop', $vmxPath, 'hard') | Out-Null
 }
 
-$delete = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('deleteVM', $vmxPath)
+$delete = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('deleteVM', $vmxPath)
 if (-not $delete.Success) {
-    Write-FarmLog "vmrun deleteVM failed for '$Name' ($($delete.StandardError.Trim())); falling back to deleting its directory directly." -Level Warning -LogDirectory $logDir
+    Write-FarmLog "vmrun deleteVM failed for '$Name' ($($delete.ErrorMessage)); falling back to deleting its directory directly." -Level Warning -LogDirectory $logDir
 }
 
 # Belt-and-braces: deleteVM sometimes leaves the directory behind (e.g. a lingering lock) --

@@ -16,7 +16,9 @@
 [CmdletBinding()]
 param(
     [string] $RootDirectory = "D:\GameFarm",
-    [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe"
+    [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe",
+    # Only needed if your clients' VMX files are encrypted -- see docs/VMWARE-SETUP.md.
+    [string] $VmxPassword
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +31,7 @@ $networks = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('listHostNetworks')
 if ($networks.Success) {
     Write-Host $networks.StandardOutput
 } else {
-    Write-Warning "Failed to list host networks: $($networks.StandardError.Trim())"
+    Write-Warning "Failed to list host networks: $($networks.ErrorMessage)"
 }
 Write-Host "To add a new network: Edit -> Virtual Network Editor (as Administrator). See docs/VMWARE-SETUP.md."
 Write-Host ""
@@ -44,7 +46,7 @@ Write-Host "----------------  ---------------"
 Get-ChildItem -Directory -LiteralPath $instancesDir | ForEach-Object {
     $vmxPath = Join-Path $_.FullName "$($_.Name).vmx"
     if (-not (Test-Path -LiteralPath $vmxPath)) { return }
-    $ipResult = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('getGuestIPAddress', $vmxPath) -TimeoutSeconds 8
+    $ipResult = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('getGuestIPAddress', $vmxPath) -TimeoutSeconds 8
     $ip = if ($ipResult.Success) { $ipResult.StandardOutput.Trim() } else { '-' }
     "{0,-16}  {1}" -f $_.Name, $ip
 }

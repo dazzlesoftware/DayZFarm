@@ -51,16 +51,41 @@ function Format-ClientName {
     returns a synthetic failure result after -TimeoutSeconds instead of hanging the caller
     forever. See docs/VMWARE-SETUP.md's troubleshooting section.
 #>
+<#
+.SYNOPSIS
+    Adds an ErrorMessage property to a vmrun result -- vmrun does not consistently write its
+    error messages to stderr (confirmed directly: "Cannot open VM: ..., A password is required
+    for this operation" and "Cannot read the virtual machine configuration file" both land on
+    STDOUT), so a script that only ever reads .StandardError silently shows a blank error for
+    those. Prefers .StandardError when it has content, otherwise falls back to .StandardOutput.
+    Mirrors DayZFarm.VMware.VmrunResult.ErrorMessage on the C# side.
+#>
+function Add-VmrunErrorMessage {
+    param([Parameter(Mandatory)] $Result)
+    $message = if ([string]::IsNullOrWhiteSpace($Result.StandardError)) { $Result.StandardOutput.Trim() } else { $Result.StandardError.Trim() }
+    $Result | Add-Member -MemberType NoteProperty -Name ErrorMessage -Value $message
+}
+
 function Invoke-Vmrun {
     param(
         [Parameter(Mandatory)] [string[]] $Arguments,
         [Parameter(Mandatory)] [string] $VmrunPath,
+        # Only needed against an encrypted master VMX (vmrun refuses everything else on it
+        # without this -- see docs/VMWARE-SETUP.md's "Encrypted master VM" section). Passed as a
+        # plain CLI argument since that's what vmrun itself requires either way -- it's visible
+        # via process command-line inspection (Task Manager, Get-Process) regardless of how it's
+        # stored in this script, the same disclosure tradeoff the dashboard's own -vp plumbing
+        # (ProcessVmrunRunner) has.
+        [string] $VmxPassword,
         [int] $TimeoutSeconds = 45
     )
 
+    $authFlags = @('-T', 'ws')
+    if ($VmxPassword) { $authFlags += @('-vp', $VmxPassword) }
+
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $VmrunPath
-    foreach ($a in (@('-T', 'ws') + $Arguments)) { $psi.ArgumentList.Add($a) }
+    foreach ($a in ($authFlags + $Arguments)) { $psi.ArgumentList.Add($a) }
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -72,20 +97,24 @@ function Invoke-Vmrun {
 
     if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
         try { $proc.Kill($true) } catch { }
-        return [PSCustomObject]@{
+        $result = [PSCustomObject]@{
             ExitCode       = -1
             StandardOutput = ''
             StandardError  = "vmrun timed out after ${TimeoutSeconds}s and was killed."
             Success        = $false
         }
+        Add-VmrunErrorMessage $result
+        return $result
     }
 
-    return [PSCustomObject]@{
+    $result = [PSCustomObject]@{
         ExitCode       = $proc.ExitCode
         StandardOutput = $stdoutTask.GetAwaiter().GetResult()
         StandardError  = $stderrTask.GetAwaiter().GetResult()
         Success        = ($proc.ExitCode -eq 0)
     }
+    Add-VmrunErrorMessage $result
+    return $result
 }
 
 <#

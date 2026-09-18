@@ -28,6 +28,8 @@ param(
     [int] $MemoryGB = 6,
     [string] $VMwareNetworkName = "vmnet2",
     [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe",
+    # Only needed if the master VMX has VMware encryption enabled -- see docs/VMWARE-SETUP.md.
+    [string] $VmxPassword,
     [switch] $Start
 )
 
@@ -56,9 +58,9 @@ if (Test-Path -LiteralPath $vmxPath) {
 }
 
 Write-FarmLog "Checking master snapshot '$MasterVmxSnapshot' on '$MasterVmx'..." -LogDirectory $logDirectory
-$snapshots = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('listSnapshots', $MasterVmx)
+$snapshots = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('listSnapshots', $MasterVmx)
 if (-not $snapshots.Success) {
-    throw "Failed to list snapshots on '$MasterVmx': $($snapshots.StandardError.Trim())"
+    throw "Failed to list snapshots on '$MasterVmx': $($snapshots.ErrorMessage)"
 }
 $hasSnapshot = ($snapshots.StandardOutput -split "`r?`n") | Where-Object { $_.Trim() -ieq $MasterVmxSnapshot }
 if (-not $hasSnapshot) {
@@ -70,15 +72,20 @@ New-Item -ItemType Directory -Force -Path $instanceDir | Out-Null
 
 try {
     Write-FarmLog "Cloning '$Name' from '$MasterVmx' (snapshot '$MasterVmxSnapshot')..." -LogDirectory $logDirectory
-    $clone = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @(
+    $clone = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @(
         'clone', $MasterVmx, $vmxPath, 'linked', "-snapshot=$MasterVmxSnapshot", "-cloneName=$Name")
     if (-not $clone.Success) {
-        throw "Failed to clone VM '$Name': $($clone.StandardError.Trim())"
+        throw "Failed to clone VM '$Name': $($clone.ErrorMessage)"
     }
 
     Write-FarmLog "Configuring '$Name' ($CpuCount vCPU, $MemoryGB GB RAM, network $VMwareNetworkName)..." -LogDirectory $logDirectory
+    # cpuid.coresPerSocket is cloned as-is from the master and VMware refuses to power on a VM
+    # whose numvcpus isn't an exact multiple of it (confirmed live). Pinning it to 1 here makes
+    # every positive CpuCount valid regardless of the master's own socket/core layout -- mirrors
+    # GameFarm.VMware.VMwareVirtualMachineProvider.CreateAsync's identical fix.
     Set-VmxValues -Path $vmxPath -Updates @{
         numvcpus                   = $CpuCount
+        'cpuid.coresPerSocket'     = 1
         memsize                    = ($MemoryGB * 1024)
         'ethernet0.connectionType' = 'custom'
         'ethernet0.vnet'           = $VMwareNetworkName
@@ -89,16 +96,16 @@ try {
 
     if ($Start) {
         Write-FarmLog "Starting '$Name'..." -LogDirectory $logDirectory
-        $startResult = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('start', $vmxPath, 'nogui')
+        $startResult = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('start', $vmxPath, 'nogui')
         if (-not $startResult.Success) {
-            throw "Failed to start VM '$Name': $($startResult.StandardError.Trim())"
+            throw "Failed to start VM '$Name': $($startResult.ErrorMessage)"
         }
         Write-FarmLog "Client VM '$Name' started." -LogDirectory $logDirectory
     }
 }
 catch {
     Write-FarmLog "Failed to create '$Name': $($_.Exception.Message). Rolling back..." -Level Error -LogDirectory $logDirectory
-    try { Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('deleteVM', $vmxPath) | Out-Null } catch { }
+    try { Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('deleteVM', $vmxPath) | Out-Null } catch { }
     if (Test-Path -LiteralPath $instanceDir) {
         try { Remove-Item -LiteralPath $instanceDir -Recurse -Force } catch { }
     }

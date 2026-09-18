@@ -293,6 +293,34 @@ document.getElementById('agent-package-form').addEventListener('submit', async e
   }
 });
 
+// ---- VMware Master Password (see docs/VMWARE-SETUP.md) ----
+// Only needed for an encrypted master VMX -- vmrun's -vp flag. Stored via the same DPAPI secret
+// store as everything else; the dashboard only ever learns whether it's set, never its value.
+
+async function loadVmwarePassword() {
+  const panel = document.getElementById('vmware-password-panel');
+  const res = await api('/api/vmware/master-password');
+  if (!res.ok) { panel.textContent = 'Failed to load VMware password status.'; return; }
+  const info = await res.json();
+  panel.innerHTML = `<div><strong>Status:</strong> ${info.set ? 'Set' : 'Not set'}</div>`;
+}
+
+document.getElementById('vmware-password-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.target;
+  const password = form.elements['password'].value;
+
+  const res = await api('/api/vmware/master-password', { method: 'POST', body: JSON.stringify({ password: password || null }) });
+  if (res.ok) {
+    form.reset();
+    showToast(password ? 'VMware master password saved.' : 'VMware master password cleared.', false);
+    await loadVmwarePassword();
+  } else {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+    showToast(`Failed to save VMware password: ${err.error ?? res.status}`, true);
+  }
+});
+
 // ---- Create Client / Create Clients (Range) modals ----
 
 function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
@@ -373,3 +401,4 @@ connection.start().catch(err => console.error('SignalR connection failed', err))
 bootstrap();
 loadHostPlugins();
 loadAgentPackage();
+loadVmwarePassword();

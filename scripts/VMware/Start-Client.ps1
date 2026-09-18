@@ -5,7 +5,10 @@
 param(
     [Parameter(Mandatory)] [string] $Name,
     [string] $RootDirectory = "D:\GameFarm",
-    [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe"
+    [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe",
+    # Only needed if this client's VMX is encrypted -- linked clones of an encrypted master
+    # inherit its encryption. See docs/VMWARE-SETUP.md.
+    [string] $VmxPassword
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,8 +21,8 @@ if (-not (Test-Path -LiteralPath $vmxPath)) {
     throw "VM '$Name' not found at '$vmxPath'."
 }
 
-$result = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('start', $vmxPath, 'nogui')
+$result = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('start', $vmxPath, 'nogui')
 if (-not $result.Success) {
-    throw "Failed to start '$Name': $($result.StandardError.Trim())"
+    throw "Failed to start '$Name': $($result.ErrorMessage)"
 }
 Write-FarmLog "Started VM '$Name'."

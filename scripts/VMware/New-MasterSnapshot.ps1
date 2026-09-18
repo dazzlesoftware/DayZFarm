@@ -21,7 +21,9 @@
 param(
     [Parameter(Mandatory)] [string] $MasterVmx,
     [string] $SnapshotName = "Baseline",
-    [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe"
+    [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe",
+    # Only needed if the master VMX has VMware encryption enabled -- see docs/VMWARE-SETUP.md.
+    [string] $VmxPassword
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,9 +39,9 @@ if (Test-VmxRunning -VmxPath $MasterVmx -VmrunPath $VmrunPath) {
     throw "Master VMX '$MasterVmx' is currently running. Shut it down cleanly first -- linked clones need a clean, powered-off snapshot."
 }
 
-$result = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('snapshot', $MasterVmx, $SnapshotName)
+$result = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('snapshot', $MasterVmx, $SnapshotName)
 if (-not $result.Success) {
-    throw "Failed to take snapshot '$SnapshotName' on '$MasterVmx': $($result.StandardError.Trim())"
+    throw "Failed to take snapshot '$SnapshotName' on '$MasterVmx': $($result.ErrorMessage)"
 }
 
 Write-Host "Took snapshot '$SnapshotName' on '$MasterVmx'. Clients can now be linked-cloned against it."

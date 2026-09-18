@@ -8,6 +8,8 @@ using GameFarm.Shared;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+using GameFarm.Core.Interfaces;
+
 namespace GameFarm.Controller.Services;
 
 /// <summary>

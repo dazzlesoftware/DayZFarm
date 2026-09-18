@@ -16,6 +16,9 @@ param(
     [Parameter(Mandatory)] [string] $Name,
     [string] $RootDirectory = "D:\GameFarm",
     [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe",
+    # Only needed if this client's VMX is encrypted -- linked clones of an encrypted master
+    # inherit its encryption. See docs/VMWARE-SETUP.md.
+    [string] $VmxPassword,
     [switch] $Force
 )
 
@@ -30,17 +33,17 @@ if (-not (Test-Path -LiteralPath $vmxPath)) {
 }
 
 if ($Force) {
-    $result = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('stop', $vmxPath, 'hard')
+    $result = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('stop', $vmxPath, 'hard')
     if (-not $result.Success) {
-        throw "Failed to stop '$Name': $($result.StandardError.Trim())"
+        throw "Failed to stop '$Name': $($result.ErrorMessage)"
     }
 } else {
-    $soft = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('stop', $vmxPath, 'soft')
+    $soft = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('stop', $vmxPath, 'soft')
     if (-not $soft.Success) {
-        Write-FarmLog "Graceful stop of '$Name' failed ($($soft.StandardError.Trim())); forcing a hard stop." -Level Warning
-        $hard = Invoke-Vmrun -VmrunPath $VmrunPath -Arguments @('stop', $vmxPath, 'hard')
+        Write-FarmLog "Graceful stop of '$Name' failed ($($soft.ErrorMessage)); forcing a hard stop." -Level Warning
+        $hard = Invoke-Vmrun -VmrunPath $VmrunPath -VmxPassword $VmxPassword -Arguments @('stop', $vmxPath, 'hard')
         if (-not $hard.Success) {
-            throw "Failed to stop '$Name': $($hard.StandardError.Trim())"
+            throw "Failed to stop '$Name': $($hard.ErrorMessage)"
         }
     }
 }

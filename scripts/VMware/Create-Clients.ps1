@@ -18,6 +18,8 @@ param(
     [int] $MemoryGB = 6,
     [string] $VMwareNetworkName = "vmnet2",
     [string] $VmrunPath = "C:\Program Files\VMware\VMware Workstation\vmrun.exe",
+    # Only needed if the master VMX has VMware encryption enabled -- see docs/VMWARE-SETUP.md.
+    [string] $VmxPassword,
     [switch] $StartVms
 )
 
@@ -36,6 +38,7 @@ $commonArgs = @{
     MemoryGB          = $MemoryGB
     VMwareNetworkName = $VMwareNetworkName
     VmrunPath         = $VmrunPath
+    VmxPassword       = $VmxPassword
 }
 
 for ($i = $Start; $i -lt ($Start + $Count); $i++) {

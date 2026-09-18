@@ -161,10 +161,48 @@ docs/MASTER-IMAGE.md's Hyper-V rebuild process:
    `Create-Clients.ps1` for a fresh range). Each client will need its Steam account logged in
    again, since a fresh linked clone has no saved Steam session.
 
+## Encrypted master VM
+
+If the master VMX has VMware encryption enabled, `vmrun` refuses to do **anything** to it —
+including read-only operations like listing snapshots — without a password, confirmed directly:
+`vmrun listSnapshots <path>` on an encrypted VM fails immediately with `Cannot open VM: ...,
+A password is required for this operation`.
+
+The password can be set once from the dashboard's **VMware Master Password** panel (stored via
+the same DPAPI-backed secret store as everything else, read fresh on every `vmrun` call — see
+`VmrunArguments.WithPassword`/`ProcessVmrunRunner`), or passed to the standalone scripts via
+`-VmxPassword`. This genuinely fixes read/manage operations against an encrypted VM —
+`listSnapshots`, `start`, `stop`, `getGuestIPAddress` all work correctly with the right password.
+
+**It does *not* fix `CreateAsync`/`Create-Client.ps1`, though.** Confirmed directly: `vmrun clone`
+against an encrypted VM fails with `Cannot read the virtual machine configuration file` **even
+with the correct `-vp` password** — both `linked` and `full` clone modes fail identically. This
+is a VMware Workstation product limitation (cloning an encrypted VM isn't supported by `vmrun` at
+all, not something this farm's code can work around), not a bug here.
+
+**If you need to create clients, the master VM cannot be encrypted — full stop.** Remove
+encryption from it in VMware Workstation (look under the VM menu for "Encrypt"/"Manage
+Encryption" while it's powered off), then re-take the `Baseline` snapshot. The password support
+above still has real value for anything you *don't* want to decrypt — a client VM you want kept
+encrypted, e.g. — but the master specifically has to be unencrypted for `CreateAsync`/
+`Create-Client.ps1` to work. VM-level encryption doesn't add much in this setup anyway, since
+agent tokens and server passwords are already encrypted separately via the Controller's own DPAPI
+secret store.
+
 ## Troubleshooting
 
 - **"Master VMX has no snapshot named '...'"**: take the snapshot from step 7 above, named
   exactly what `MasterVmxSnapshot` says.
+- **"A password is required for this operation"** (or Create Client fails with a `vmrun timed
+  out` error on `listSnapshots`): the master VMX (or a client's linked clone) is encrypted — see
+  "Encrypted master VM" above. The timeout is really this error in disguise; VMware Workstation
+  can pop up its own password prompt with no one there to answer it, which is what actually eats
+  the 45 seconds before `ProcessVmrunRunner`'s own timeout kills it.
+- **"Failed to clone VM '...': Cannot read the virtual machine configuration file"** (even after
+  setting the correct VMware master password): the master VM is encrypted, and `vmrun clone`
+  doesn't support encrypted VMs at all, regardless of password — see "Encrypted master VM" above.
+  Remove encryption from the master to fix this; there's no password-based workaround for cloning
+  specifically.
 - **A client shows as `Off` right after creation even with `StartAfterCreate`**: check the
   Controller log for the actual `vmrun start` error — a common cause is `VmrunPath` pointing at a
   Workstation Player install that doesn't support scripted linked clones the same way Pro does.

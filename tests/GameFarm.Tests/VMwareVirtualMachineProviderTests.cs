@@ -238,8 +238,58 @@ public sealed class VMwareVirtualMachineProviderTests : IDisposable
 
         var vmxContent = File.ReadAllText(Path.Combine(instanceDir, "DayZ-006.vmx"));
         Assert.Contains("numvcpus = \"2\"", vmxContent);
+        Assert.Contains("cpuid.coresPerSocket = \"1\"", vmxContent);
         Assert.Contains("memsize = \"4096\"", vmxContent);
         Assert.Contains("ethernet0.vnet = \"vmnet2\"", vmxContent);
+    }
+
+    [Fact]
+    public async Task CreateAsync_OverridesAnInheritedCoresPerSocketFromTheMaster()
+    {
+        // Confirmed live: a master built with cpuid.coresPerSocket=3 produced clones that
+        // wouldn't power on ("number of virtual CPUs is not a multiple of the number of cores
+        // per socket") the moment a client's CpuCount wasn't itself a multiple of 3 -- the clone
+        // only had numvcpus overwritten, not the inherited coresPerSocket. Pinning
+        // coresPerSocket to 1 makes every positive CpuCount valid regardless of what the master
+        // happened to be built with.
+        var masterVmx = Path.Combine(_tempRoot, "Master.vmx");
+        File.WriteAllText(masterVmx, "displayName = \"Master\"");
+        var instanceDir = Path.Combine(_tempRoot, "Instances", "DayZ-007");
+
+        var runner = new FakeVmrunRunner
+        {
+            Responses =
+            {
+                ["listSnapshots"] = _ => new VmrunResult { ExitCode = 0, StandardOutput = "Total snapshots: 1\nBaseline\n" },
+                ["clone"] = args =>
+                {
+                    Directory.CreateDirectory(instanceDir);
+                    // Simulates vmrun cloning a master whose own vmx has coresPerSocket=3 --
+                    // the clone inherits that line verbatim until VmxFile.Set overwrites it.
+                    File.WriteAllText(args[3], "displayName = \"placeholder\"\ncpuid.coresPerSocket = \"3\"");
+                    return new VmrunResult { ExitCode = 0 };
+                }
+            }
+        };
+        var options = new GameFarmOptions { RootDirectory = _tempRoot, MasterVmxSnapshot = "Baseline" };
+        var sut = CreateSut(runner, options);
+
+        var request = new VirtualMachineCreateRequest
+        {
+            Name = "DayZ-007",
+            ParentDiskPath = masterVmx,
+            InstanceDirectory = instanceDir,
+            NetworkName = "vmnet2",
+            CpuCount = 4, // not a multiple of the master's inherited coresPerSocket=3
+            MemoryGB = 4
+        };
+
+        await sut.CreateAsync(request);
+
+        var vmxContent = File.ReadAllText(Path.Combine(instanceDir, "DayZ-007.vmx"));
+        Assert.Contains("numvcpus = \"4\"", vmxContent);
+        Assert.Contains("cpuid.coresPerSocket = \"1\"", vmxContent);
+        Assert.DoesNotContain("cpuid.coresPerSocket = \"3\"", vmxContent);
     }
 
     [Fact]

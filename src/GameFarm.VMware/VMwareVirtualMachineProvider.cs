@@ -80,7 +80,7 @@ public sealed class VMwareVirtualMachineProvider : IVirtualMachineProvider
         var soft = await _runner.RunAsync(new[] { "-T", VmType, "stop", vmxPath, "soft" }, ct);
         if (soft.Success) return;
 
-        _logger.LogWarning("Graceful stop of '{Name}' failed ({Error}); forcing a hard stop.", name, soft.StandardError);
+        _logger.LogWarning("Graceful stop of '{Name}' failed ({Error}); forcing a hard stop.", name, soft.ErrorMessage);
         var hard = await _runner.RunAsync(new[] { "-T", VmType, "stop", vmxPath, "hard" }, ct);
         ThrowIfFailed(hard, $"stop VM '{name}'");
     }
@@ -148,10 +148,22 @@ public sealed class VMwareVirtualMachineProvider : IVirtualMachineProvider
             // vmrun has no cmdlet-equivalent for CPU count, memory size, or network adapter
             // settings -- these are configured by editing the cloned .vmx directly, the
             // standard, documented way VMware itself expects this to be done. See VmxFile.
+            //
+            // cpuid.coresPerSocket is cloned as-is from the master and VMware refuses to power on
+            // a VM whose numvcpus isn't an exact multiple of it -- confirmed live: a master built
+            // with 3 cores/socket produced clones that failed to start with "The virtual machine
+            // cannot be powered on because the number of virtual CPUs is not a multiple of the
+            // number of cores per socket" the moment a client asked for a CpuCount (e.g. the
+            // default of 4) that wasn't a multiple of 3. Pinning this to 1 here makes every
+            // positive CpuCount valid regardless of whatever socket/core layout the master
+            // happened to be built with -- the topology itself (sockets vs. cores per socket)
+            // has no performance effect for a VM workload like this, only the total vCPU count
+            // requested actually matters.
             var memoryMb = (long)request.MemoryGB * 1024;
             VmxFile.Set(vmxPath, new Dictionary<string, string>
             {
                 ["numvcpus"] = request.CpuCount.ToString(),
+                ["cpuid.coresPerSocket"] = "1",
                 ["memsize"] = memoryMb.ToString(),
                 ["ethernet0.connectionType"] = "custom",
                 ["ethernet0.vnet"] = request.NetworkName,
@@ -188,7 +200,7 @@ public sealed class VMwareVirtualMachineProvider : IVirtualMachineProvider
         if (!delete.Success)
             _logger.LogWarning(
                 "vmrun deleteVM failed for '{Name}' ({Error}); falling back to deleting its instance directory directly.",
-                name, delete.StandardError);
+                name, delete.ErrorMessage);
 
         // Belt-and-braces: deleteVM sometimes leaves the directory behind (e.g. a lingering
         // snapshot lock) -- always also remove the instance directory afterward if still there,
@@ -298,7 +310,7 @@ public sealed class VMwareVirtualMachineProvider : IVirtualMachineProvider
     private void ThrowIfFailed(VmrunResult result, string action)
     {
         if (result.Success) return;
-        _logger.LogError("Failed to {Action}: {Error}", action, result.StandardError);
-        throw new InvalidOperationException($"Failed to {action}: {result.StandardError.Trim()}");
+        _logger.LogError("Failed to {Action}: {Error}", action, result.ErrorMessage);
+        throw new InvalidOperationException($"Failed to {action}: {result.ErrorMessage}");
     }
 }

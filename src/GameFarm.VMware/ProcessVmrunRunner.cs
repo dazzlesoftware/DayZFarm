@@ -1,8 +1,18 @@
 using System.Diagnostics;
 using System.Text;
+using GameFarm.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace GameFarm.VMware;
+
+/// <summary>Well-known secret name for the master VMX's encryption password (see
+/// docs/VMWARE-SETUP.md's "Encrypted master VM" section) -- a single farm-wide secret, not
+/// per-client, so it doesn't need the per-client naming scheme <c>ClientOrchestrator</c> uses for
+/// agent tokens/server passwords.</summary>
+public static class VmwareSecretNames
+{
+    public const string MasterVmxPassword = "vmware-master-vmx-password";
+}
 
 /// <summary>
 /// Executes vmrun.exe (VMware Workstation's command-line automation tool) as an out-of-process
@@ -25,6 +35,7 @@ public sealed class ProcessVmrunRunner : IVmrunRunner
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(45);
 
     private readonly string _vmrunPath;
+    private readonly ISecretStore _secrets;
     private readonly ILogger<ProcessVmrunRunner> _logger;
 
     // Mirrors GameFarm.HyperV.ProcessPowerShellRunner's concurrency cap: without one, many
@@ -32,9 +43,10 @@ public sealed class ProcessVmrunRunner : IVmrunRunner
     // concurrent vmrun process spawns and start timing out on each other.
     private static readonly SemaphoreSlim ConcurrentProcessLimit = new(4, 4);
 
-    public ProcessVmrunRunner(string vmrunPath, ILogger<ProcessVmrunRunner> logger)
+    public ProcessVmrunRunner(string vmrunPath, ISecretStore secrets, ILogger<ProcessVmrunRunner> logger)
     {
         _vmrunPath = vmrunPath;
+        _secrets = secrets;
         _logger = logger;
     }
 
@@ -46,6 +58,13 @@ public sealed class ProcessVmrunRunner : IVmrunRunner
         await ConcurrentProcessLimit.WaitAsync(ct);
         try
         {
+            // Read fresh on every call (same convention as agent tokens elsewhere) so setting/
+            // clearing the password from the dashboard takes effect immediately, no restart
+            // needed. Never logged -- every log statement below uses the original `arguments`,
+            // not this password-including list, specifically so it never reaches Serilog output.
+            var password = _secrets.Get(VmwareSecretNames.MasterVmxPassword);
+            var fullArguments = VmrunArguments.WithPassword(arguments, password);
+
             var psi = new ProcessStartInfo(_vmrunPath)
             {
                 RedirectStandardOutput = true,
@@ -53,7 +72,7 @@ public sealed class ProcessVmrunRunner : IVmrunRunner
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            foreach (var arg in arguments)
+            foreach (var arg in fullArguments)
                 psi.ArgumentList.Add(arg);
 
             using var process = new Process { StartInfo = psi };
@@ -99,7 +118,7 @@ public sealed class ProcessVmrunRunner : IVmrunRunner
             };
 
             if (!result.Success)
-                _logger.LogWarning("vmrun exited with code {ExitCode}: {Error}", result.ExitCode, result.StandardError);
+                _logger.LogWarning("vmrun exited with code {ExitCode}: {Error}", result.ExitCode, result.ErrorMessage);
 
             return result;
         }

@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using GameFarm.Core.Configuration;
 using Microsoft.Extensions.Options;
 
+using GameFarm.Core.Interfaces;
+
 namespace GameFarm.Controller.Services;
 
 /// <summary>
