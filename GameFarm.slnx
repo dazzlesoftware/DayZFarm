@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GameFarm.Agent/GameFarm.Agent.csproj" />
+    <Project Path="src/GameFarm.Controller/GameFarm.Controller.csproj" />
+    <Project Path="src/GameFarm.Core/GameFarm.Core.csproj" />
+    <Project Path="src/GameFarm.HyperV/GameFarm.HyperV.csproj" />
+    <Project Path="src/GameFarm.Shared/GameFarm.Shared.csproj" />
+    <Project Path="src/GameFarm.VMware/GameFarm.VMware.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GameFarm.Tests/GameFarm.Tests.csproj" />
+  </Folder>
+</Solution>

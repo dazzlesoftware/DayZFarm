@@ -1,5 +1,10 @@
 # Master Image Workflow
 
+This document covers the **Hyper-V** backend specifically — for VMware Workstation, see
+docs/VMWARE-SETUP.md instead (its master-build process covers the same ground: Windows install,
+BattlEye, Agent, graphics, but through VMware Workstation's own wizard and a linked-clone
+snapshot rather than `Create-Master.ps1` and a differencing VHDX).
+
 The master VM (`DayZ-Master`) is the parent of every client's differencing disk. It is built
 **once**, then only booted again for maintenance/rebuilds — never alongside its differencing
 children.
@@ -16,7 +21,7 @@ This is genuinely safe for many clients running **simultaneously**, and this dis
 automatically by `Create-Master.ps1` below — there's no separate template-building step needed.
 
 ```powershell
-.\scripts\Create-Master.ps1 -CpuCount 4 -MemoryGB 6 -SizeGB 80 -VirtualSwitchName DayZFarmSwitch -IsoPath D:\Windows.iso
+.\scripts\Hyper-V\Create-Master.ps1 -CpuCount 4 -MemoryGB 6 -SizeGB 80 -VirtualSwitchName GameFarmSwitch -IsoPath D:\Windows.iso
 ```
 
 This creates a Generation 2 VM with Secure Boot and the standard integration services enabled,
@@ -25,8 +30,13 @@ if supplied, and reports the manual next steps. Pass `-SkipSteamLibraryDisk` to 
 entirely — Steam/DayZ then just install onto the OS disk as normal, for both the master and
 every client. (If you want to build the Steam Library disk separately instead — e.g. keeping the
 master a pure OS image and populating the library via some other temporary VM — pass
-`-SkipSteamLibraryDisk` here and use `scripts\Create-SteamLibraryDisk.ps1` on its own; every
-`Create-Client.ps1` run auto-detects the conventional path either way.)
+`-SkipSteamLibraryDisk` here and use `scripts\Hyper-V\Create-SteamLibraryDisk.ps1` on its own;
+every `Create-Client.ps1` run auto-detects the conventional path either way.)
+
+> **VMware Workstation:** this whole Steam Library disk optimization is Hyper-V-only — there is
+> no equivalent yet for the VMware backend (`CreateAsync` throws if you try to combine it with a
+> VMware farm). Install Steam + DayZ directly onto the master's own disk instead; see
+> docs/VMWARE-SETUP.md's "Not yet supported" section.
 
 ## Manual steps (cannot be automated)
 
@@ -51,11 +61,11 @@ master a pure OS image and populating the library via some other temporary VM �
    `<DayZ install>\battleye\` — check for that file as confirmation it's working), and the
    server eventually kicks with "BattlEye: Game restart required" partway into every session.
    See docs/TROUBLESHOOTING.md.
-5. **Install DayZ Farm Agent.**
-   - `dotnet publish src/DayZFarm.Agent -c Release -o C:\DayZFarmAgent` (run on the host, then
+5. **Install Game Farm Agent.**
+   - `dotnet publish src/GameFarm.Agent -c Release -o C:\GameFarmAgent` (run on the host, then
      copy the output into the VM, e.g. via a shared folder or a temporary network share).
-   - Inside the VM: `C:\DayZFarmAgent\DayZFarm.Agent.exe` once to generate its token file
-     (`%ProgramData%\DayZFarmAgent\agent-token.secret`), then install with
+   - Inside the VM: `C:\GameFarmAgent\GameFarm.Agent.exe` once to generate its token file
+     (`%ProgramData%\GameFarmAgent\agent-token.secret`), then install with
      `scripts\Install-Agent.ps1` (copy it into the VM too, or run it over a mapped drive):
      ```powershell
      .\Install-Agent.ps1 -UserName <the account created in step 1>
@@ -73,7 +83,10 @@ master a pure OS image and populating the library via some other temporary VM �
 8. **Protect the master disks.** Mark both `DayZ-Master.vhdx` and (if used) `SteamLibrary-
    Master.vhdx` read-only at the filesystem level (`attrib +r`) as a safety net, and never boot
    `DayZ-Master` again except for a deliberate rebuild (see below). Differencing children break
-   if either parent's on-disk bytes change.
+   if either parent's on-disk bytes change. (VMware Workstation has no direct filesystem
+   equivalent to this step — its protection is the snapshot itself: don't boot the master VMX
+   again after taking it, since every linked clone depends on that snapshot's on-disk state; see
+   docs/VMWARE-SETUP.md's "Build the master VM" warning.)
 9. **Create differencing clients** — see the root README / docs/INSTALL.md.
    `Create-Client.ps1`/`Create-Clients.ps1` auto-detect `SteamLibrary-Master.vhdx` at its
    conventional path and give each client its own differencing disk against it with no further
@@ -97,21 +110,28 @@ master's DayZ video options, before shutting down:
 - FPS cap (`-maxFPS` launch parameter or in-game limiter, e.g. 30): reduces host CPU/GPU load
   across many simultaneous clients
 
-**GPU virtualization (GPU-P) is required, not optional.** DayZ's Enfusion engine needs a real
-DirectX 11-capable GPU to even launch — the default Hyper-V synthetic display adapter (WDDM) has
-no 3D acceleration at all, so DayZ fails immediately with an *"Error creating enfusion engine"*
-dialog (GPU not supported / drivers not up to date / DirectX not up to date) on any VM without
-GPU-P or Discrete Device Assignment. This corrects earlier guidance in this doc that implied the
-default adapter was sufficient for low-graphics clients — confirmed not to be the case.
+**GPU virtualization (GPU-P) is required, not optional — on Hyper-V.** DayZ's Enfusion engine
+needs a real DirectX 11-capable GPU to even launch — the default Hyper-V synthetic display
+adapter (WDDM) has no 3D acceleration at all, so DayZ fails immediately with an *"Error creating
+enfusion engine"* dialog (GPU not supported / drivers not up to date / DirectX not up to date) on
+any VM without GPU-P or Discrete Device Assignment. This corrects earlier guidance in this doc
+that implied the default adapter was sufficient for low-graphics clients — confirmed not to be
+the case.
 
-`IGpuVirtualizationProvider` (`DayZFarm.Core`) still only automates *detection*
+> **Building on VMware Workstation instead?** This entire section is Hyper-V-specific — you can
+> skip it. VMware Workstation doesn't need a GPU-P equivalent at all: its virtual SVGA 3D device
+> gives the guest real DirectX-accelerated graphics with no host GPU passthrough/partitioning
+> required, just VMware Tools installed and **Accelerate 3D Graphics** enabled in the VM's
+> display settings. See docs/VMWARE-SETUP.md's master-build steps.
+
+`IGpuVirtualizationProvider` (`GameFarm.Core`) still only automates *detection*
 (`Get-VMGpuPartitionAdapter`) — actually provisioning GPU-P depends on host GPU vendor/driver
 specifics that vary too much for a generic implementation to guess safely, so `ConfigureAsync`
 still throws `NotSupportedException` there. For an **NVIDIA** host, though, a tested, working
 automated tool now exists:
 
 ```powershell
-.\scripts\Tools\Enable-GpuPartitionForVMs.ps1
+.\scripts\Hyper-V\Tools\Enable-GpuPartitionForVMs.ps1
 ```
 
 Run on the Hyper-V host (not inside a VM), it loops over every current VM by default (or
@@ -119,7 +139,7 @@ Run on the Hyper-V host (not inside a VM), it loops over every current VM by def
 Automatic Checkpoints (both required for GPU-P), assigns a GPU-P adapter from the host's NVIDIA
 GPU, sets the required MMIO space, and copies the host's NVIDIA driver payload directly into the
 guest's VHDX offline (no matching driver install needed inside the guest first). See the
-script's own help (`Get-Help .\scripts\Tools\Enable-GpuPartitionForVMs.ps1 -Full`) for sizing a
+script's own help (`Get-Help .\scripts\Hyper-V\Tools\Enable-GpuPartitionForVMs.ps1 -Full`) for sizing a
 GPU partition down when sharing one GPU across many concurrent clients
 (`-OptimalPartitionVRAM`/`-OptimalPartitionCompute`), and re-run it (optionally with `-OnlyGpuP
 -SkipGpuPAssignment` to just refresh drivers) after any host NVIDIA driver update.
@@ -134,6 +154,9 @@ GPU partition down when sharing one GPU across many concurrent clients
 > first: `Set-VM -Name '<vm name>' -AutomaticCheckpointsEnabled $false`.
 
 ## Rebuilding the master after a major DayZ update
+
+*(Hyper-V. For VMware Workstation, see docs/VMWARE-SETUP.md's own "Rebuilding the master after a
+major DayZ update" section — same idea, new snapshot instead of a patched VHDX.)*
 
 Because differencing children depend on the exact on-disk state of the parent, there is no
 supported way to patch `DayZ-Master.vhdx` in place once clients exist against it. To rebuild:

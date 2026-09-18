@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Installs the DayZ Farm Agent inside a client VM as a Scheduled Task that runs directly in
+    Installs the Game Farm Agent inside a client VM as a Scheduled Task that runs directly in
     the interactive logon session, and (optionally) configures Windows auto-logon for that user.
 
 .DESCRIPTION
@@ -32,8 +32,8 @@
     every boot, so this must be re-applied every boot, not just once. See docs/TROUBLESHOOTING.md.
 
 .PARAMETER AgentExePath
-    Path to the published DayZFarm.Agent.exe (default C:\DayZFarmAgent\DayZFarm.Agent.exe).
-    Publish it first: dotnet publish src/DayZFarm.Agent -c Release -o C:\DayZFarmAgent
+    Path to the published GameFarm.Agent.exe (default C:\GameFarmAgent\GameFarm.Agent.exe).
+    Publish it first: dotnet publish src/GameFarm.Agent -c Release -o C:\GameFarmAgent
 
 .PARAMETER UserName
     The local Windows account the agent's Scheduled Task should run as (and, unless
@@ -74,7 +74,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $AgentExePath = "C:\DayZFarmAgent\DayZFarm.Agent.exe",
+    [string] $AgentExePath = "C:\GameFarmAgent\GameFarm.Agent.exe",
     [Parameter(Mandatory)] [string] $UserName,
     [System.Security.SecureString] $Password,
     [switch] $SkipAutoLogon,
@@ -91,7 +91,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 if (-not (Test-Path $AgentExePath)) {
-    throw "Agent executable not found at '$AgentExePath'. Publish it first: dotnet publish src/DayZFarm.Agent -c Release -o C:\DayZFarmAgent"
+    throw "Agent executable not found at '$AgentExePath'. Publish it first: dotnet publish src/GameFarm.Agent -c Release -o C:\GameFarmAgent"
 }
 
 if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
@@ -100,13 +100,13 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
 
 # --- Remove any earlier LocalSystem-service install, if present -- it and the Scheduled Task
 # registered below would otherwise both try to run the agent and fight over its Kestrel port. ---
-$existingService = Get-Service -Name "DayZ Farm Agent" -ErrorAction SilentlyContinue
+$existingService = Get-Service -Name "Game Farm Agent" -ErrorAction SilentlyContinue
 if ($existingService) {
-    Write-Host "Removing previous 'DayZ Farm Agent' Windows Service install..."
+    Write-Host "Removing previous 'Game Farm Agent' Windows Service install..."
     if ($existingService.Status -eq 'Running') {
-        Stop-Service -Name "DayZ Farm Agent" -Force
+        Stop-Service -Name "Game Farm Agent" -Force
     }
-    sc.exe delete "DayZ Farm Agent" | Out-Null
+    sc.exe delete "Game Farm Agent" | Out-Null
 }
 
 # --- Auto-logon ---
@@ -140,9 +140,9 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 $runLevel = if ($RunElevated) { 'Highest' } else { 'Limited' }
 $principal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType Interactive -RunLevel $runLevel
 
-Register-ScheduledTask -TaskName "DayZ Farm Agent" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+Register-ScheduledTask -TaskName "Game Farm Agent" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 
-Write-Host "Registered Scheduled Task 'DayZ Farm Agent' (runs as '$UserName', at logon, $runLevel privileges)."
+Write-Host "Registered Scheduled Task 'Game Farm Agent' (runs as '$UserName', at logon, $runLevel privileges)."
 Write-Host "Reboot this VM (or log off/on as '$UserName') to start the agent for the first time."
 
 # --- Network checksum offload fix, re-applied at every boot (see DESCRIPTION) ---
@@ -156,9 +156,9 @@ if (-not $SkipChecksumOffloadFix) {
     $offloadAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$offloadCommand`""
     $offloadTrigger = New-ScheduledTaskTrigger -AtStartup
     $offloadPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    Register-ScheduledTask -TaskName "DayZ Farm - Disable NIC Offload" -Action $offloadAction -Trigger $offloadTrigger -Principal $offloadPrincipal -Force | Out-Null
+    Register-ScheduledTask -TaskName "Game Farm - Disable NIC Offload" -Action $offloadAction -Trigger $offloadTrigger -Principal $offloadPrincipal -Force | Out-Null
 
-    Write-Host "Registered Scheduled Task 'DayZ Farm - Disable NIC Offload' (runs as SYSTEM, at every boot)."
+    Write-Host "Registered Scheduled Task 'Game Farm - Disable NIC Offload' (runs as SYSTEM, at every boot)."
 } else {
     Write-Host "Skipped the network checksum offload fix (-SkipChecksumOffloadFix)."
 }

@@ -1,12 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Decrypts and prints the DayZ Farm Agent's token so it can be pasted into the Controller
+    Decrypts and prints the Game Farm Agent's token so it can be pasted into the Controller
     dashboard's "Register Token" prompt.
 
 .DESCRIPTION
     RUN THIS INSIDE THE CLIENT VM ITSELF (not on the Hyper-V host) -- the agent token file
-    (%ProgramData%\DayZFarmAgent\agent-token.secret) is encrypted with Windows DPAPI at
+    (%ProgramData%\GameFarmAgent\agent-token.secret) is encrypted with Windows DPAPI at
     machine scope (see AgentTokenStore.cs), so it can only be decrypted by a process running on
     that same machine. Opening the file directly in Notepad (or anywhere else) will only ever
     show encrypted bytes -- that's expected, not a bug.
@@ -19,7 +19,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $TokenFilePath = (Join-Path $env:ProgramData "DayZFarmAgent\agent-token.secret")
+    [string] $TokenFilePath = (Join-Path $env:ProgramData "GameFarmAgent\agent-token.secret")
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,7 +34,7 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
 }
 
 if (-not (Test-Path -LiteralPath $TokenFilePath)) {
-    throw "No agent token file found at '$TokenFilePath'. Has the DayZ Farm Agent run at least once on this VM?"
+    throw "No agent token file found at '$TokenFilePath'. Has the Game Farm Agent run at least once on this VM?"
 }
 
 Add-Type -AssemblyName System.Security

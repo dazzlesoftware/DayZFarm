@@ -13,8 +13,12 @@ a **one-time** step per client VM.
 
 ## Procedure (per client VM)
 
-1. Start the client VM (`Start-Client.ps1 -Name DayZ-001` or via the dashboard).
-2. Connect to its console (Hyper-V Manager → Connect, or Enhanced Session if enabled).
+1. Start the client VM (`scripts\Hyper-V\Start-Client.ps1 -Name DayZ-001` or
+   `scripts\VMware\Start-Client.ps1 -Name DayZ-001`, whichever backend is active — or via the
+   dashboard, same either way).
+2. Connect to its console — **Hyper-V:** Hyper-V Manager → Connect (or Enhanced Session if
+   enabled). **VMware Workstation:** the VM's own window is already a console — just click into
+   it, or **VM menu → Send Ctrl+Alt+Del** if it's not focused.
 3. Start Steam (or use the dashboard's "Start Steam" button, which starts the Steam client
    process — it does not log anyone in).
 4. Log in with that client's dedicated Steam account credentials.
@@ -34,7 +38,9 @@ disk — the controller and agent never see or store the password.
 Steam supports **Local Network Game Transfers**, letting one Steam client on the LAN seed
 updates to others without each downloading from Steam's CDN independently. To use it:
 
-- Ensure all client VMs are on the same Hyper-V virtual switch / LAN segment (`DayZFarmSwitch`).
+- Ensure all client VMs are on the same virtual network / LAN segment — the Hyper-V virtual
+  switch (`GameFarmSwitch` by default) or the VMware Workstation custom network
+  (`VMwareNetworkName`, e.g. `vmnet2`), whichever backend is active.
 - In each VM's Steam client: Settings → Downloads → enable "Stream games from other computers on
   a local network" / ensure local network discovery isn't blocked by VM firewall rules (allow
   Steam's ports, typically UDP 27036 and the dynamic transfer ports Steam negotiates).
@@ -48,7 +54,7 @@ updates to others without each downloading from Steam's CDN independently. To us
 ## Registering the agent token
 
 After the agent's first run inside a client VM, it generates a random token at
-`%ProgramData%\DayZFarmAgent\agent-token.secret`, encrypted at rest with Windows DPAPI (machine
+`%ProgramData%\GameFarmAgent\agent-token.secret`, encrypted at rest with Windows DPAPI (machine
 scope). **Opening that file directly (Notepad, etc.) will only ever show encrypted bytes — that's
 expected, not a bug.** It can only be decrypted by a process running on that same VM, so retrieve
 it from inside the VM console using the provided helper script:

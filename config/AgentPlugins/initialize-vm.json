@@ -1,0 +1,7 @@
+{
+  "name": "initialize-vm",
+  "description": "Sets BEService (BattlEye) to auto-start and starts it -- see docs/TROUBLESHOOTING.md's BattlEye section for why this is required per-VM.",
+  "executable": "powershell.exe",
+  "arguments": "-NoProfile -Command \"Set-Service BEService -StartupType Automatic; Start-Service BEService; Get-Service BEService | Select-Object Name,Status,StartType | Format-Table\"",
+  "timeoutSeconds": 30
+}
